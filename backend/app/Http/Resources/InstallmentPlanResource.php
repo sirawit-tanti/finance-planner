@@ -31,6 +31,7 @@ class InstallmentPlanResource extends JsonResource
             'total_payable' => $this->total_payable,
             'status' => $this->status,
             'schedule' => $this->whenLoaded('scheduleItems', fn () => $this->scheduleItems->map(fn ($item) => [
+                'id' => $item->id,
                 'installment_no' => $item->installment_no,
                 'due_date' => $item->due_date->format('Y-m-d'),
                 'principal' => $item->principal_part,

@@ -22,6 +22,7 @@ final class InstallmentRules
         return [
             'name' => ['required', 'string', 'max:255'],
             'note' => ['nullable', 'string', 'max:2000'],
+            'category_id' => ['nullable', 'uuid', $owned('categories')],
             'interest_method' => ['required', Rule::in(['zero', 'flat', 'reducing', 'effective'])],
             'annual_rate_percent' => ['required_unless:interest_method,zero', 'nullable', self::RATE],
             'price' => ['required', self::MONEY, 'gt:0'],

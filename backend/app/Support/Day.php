@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use Carbon\Carbon;
 use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
@@ -21,9 +22,9 @@ final class Day
         return self::parse($date->format('Y-m-d'));
     }
 
-    /** Today's date in Thailand. */
+    /** Today's date in Thailand. Uses Carbon so tests can freeze it with Carbon::setTestNow(). */
     public static function today(): DateTimeImmutable
     {
-        return self::parse((new DateTimeImmutable('now', new DateTimeZone('Asia/Bangkok')))->format('Y-m-d'));
+        return self::parse(Carbon::now('Asia/Bangkok')->format('Y-m-d'));
     }
 }

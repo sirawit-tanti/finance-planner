@@ -161,21 +161,39 @@ final class ForecastContextLoader
             }
         }
 
-        // ---- cards: latest statement only (older balances are carried into it) ----
+        // ---- cards ----
+        // Issued statements (date up to the forecast start): only the latest counts, because older
+        // balances were carried into it. Open statements (not issued yet): only the FRESH part counts
+        // (total minus what was carried in), because the carried part is already forecast as the
+        // earlier statement's own payment on its own due date.
         $cards = [];
         foreach (CreditCard::query()->where('status', 'active')->orderBy('name')->get() as $card) {
-            $latest = CreditCardStatement::query()
-                ->where('credit_card_id', $card->id)
-                ->orderByDesc('statement_date')
-                ->first();
+            $statements = CreditCardStatement::query()
+                ->where('credit_card_id', $card->id)->orderBy('statement_date')->get();
+
+            $latestIssuedId = null;
+            foreach ($statements as $statement) {
+                if ($statement->statement_date->format('Y-m-d') <= $fromDay) {
+                    $latestIssuedId = $statement->id;
+                }
+            }
 
             $known = [];
-            if ($latest !== null) {
-                $outstanding = MoneyMath::exact2((string) $latest->statement_amount)
-                    ->minus(MoneyMath::exact2((string) $latest->paid_amount));
+            foreach ($statements as $statement) {
+                $isOpen = $statement->statement_date->format('Y-m-d') > $fromDay;
+                if (! $isOpen && $statement->id !== $latestIssuedId) {
+                    continue;
+                }
+
+                $amount = MoneyMath::exact2((string) $statement->statement_amount);
+                if ($isOpen) {
+                    $amount = $amount->minus(MoneyMath::exact2((string) $statement->carried_over));
+                }
+                $outstanding = $amount->minus(MoneyMath::exact2((string) $statement->paid_amount));
+
                 $known[] = new KnownStatement(
-                    Day::of($latest->statement_date),
-                    Day::of($latest->due_date),
+                    Day::of($statement->statement_date),
+                    Day::of($statement->due_date),
                     $outstanding->isNegative() ? BigDecimal::of('0.00') : $outstanding,
                 );
             }
@@ -233,7 +251,8 @@ final class ForecastContextLoader
                 ->where('funding_type', 'account')->where('account_id', $account->id)->pluck('id');
 
             $transactions = fn (string $type) => $this->sum(
-                Transaction::query()->where('account_id', $account->id)->where('type', $type)->whereBetween('txn_date', $range)
+                Transaction::query()->where('account_id', $account->id)->where('type', $type)
+                    ->whereNull('installment_plan_id')->whereBetween('txn_date', $range)
             );
 
             $total = $total

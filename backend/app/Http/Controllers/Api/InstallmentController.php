@@ -12,9 +12,15 @@ use App\Http\Resources\InstallmentPlanResource;
 use App\Models\InstallmentPlan;
 use App\Support\Day;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class InstallmentController extends Controller
 {
+    public function index(): AnonymousResourceCollection
+    {
+        return InstallmentPlanResource::collection(InstallmentPlan::query()->orderByDesc('created_at')->get());
+    }
+
     /** Calculates the schedule and the effect on future cash. Saves nothing. */
     public function simulate(InstallmentRequest $request, ForecastContextLoader $loader, InstallmentSimulator $simulator): JsonResponse
     {
@@ -29,7 +35,7 @@ class InstallmentController extends Controller
 
     public function store(InstallmentRequest $request, InstallmentService $service): JsonResponse
     {
-        $plan = $service->create(InstallmentInput::fromArray($request->validated()));
+        $plan = $service->create(InstallmentInput::fromArray($request->validated()), $request->validated('category_id'));
 
         return (new InstallmentPlanResource($plan))->response()->setStatusCode(201);
     }
@@ -37,5 +43,10 @@ class InstallmentController extends Controller
     public function show(InstallmentPlan $plan): InstallmentPlanResource
     {
         return new InstallmentPlanResource($plan->load('scheduleItems'));
+    }
+
+    public function cancel(InstallmentPlan $plan, InstallmentService $service): InstallmentPlanResource
+    {
+        return new InstallmentPlanResource($service->cancel($plan));
     }
 }

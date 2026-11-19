@@ -4,16 +4,27 @@ declare(strict_types=1);
 
 namespace App\Application\Installments;
 
+use App\Application\Statements\StatementRecalculator;
+use App\Application\Statements\StatementService;
 use App\Domain\Finance\Installments\Schedule;
 use App\Domain\Finance\Installments\ScheduleBuilder;
+use App\Models\CreditCard;
 use App\Models\InstallmentPlan;
 use App\Models\InstallmentScheduleItem;
+use App\Support\Day;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use LogicException;
 
 final class InstallmentService
 {
+    public function __construct(
+        private readonly InstallmentPurchaseRecorder $recorder,
+        private readonly StatementService $statements,
+        private readonly StatementRecalculator $recalculator,
+    ) {
+    }
+
     public function schedule(InstallmentInput $input): Schedule
     {
         try {
@@ -23,13 +34,16 @@ final class InstallmentService
         }
     }
 
-    /** Creates the plan and its whole schedule in ONE transaction (all rows or none). */
-    public function create(InstallmentInput $input): InstallmentPlan
+    /**
+     * Creates the plan, its whole schedule and the full-price purchase record in ONE transaction.
+     * For a card plan the card's statements are brought up to date so rows already charged are billed.
+     */
+    public function create(InstallmentInput $input, ?string $categoryId = null): InstallmentPlan
     {
         $schedule = $this->schedule($input);
         $t = $input->terms;
 
-        return DB::transaction(function () use ($input, $schedule, $t): InstallmentPlan {
+        return DB::transaction(function () use ($input, $schedule, $t, $categoryId): InstallmentPlan {
             $plan = new InstallmentPlan();
             $plan->fill([
                 'name' => $input->name,
@@ -65,6 +79,42 @@ final class InstallmentService
                     'remaining_principal_after' => (string) $item->remainingPrincipalAfter,
                     'status' => 'pending',
                 ])->save();
+            }
+
+            $this->recorder->record($plan, $categoryId);
+
+            if ($input->fundingType === 'credit_card') {
+                $card = CreditCard::query()->findOrFail($input->cardId);
+                $today = Day::today();
+                if ($plan->first_due_date->format('Y-m-d') <= $today->format('Y-m-d')) {
+                    $this->statements->statementFor($card, Day::of($plan->first_due_date));
+                }
+                $this->statements->statementFor($card, $today);
+            }
+
+            return $plan->load('scheduleItems');
+        });
+    }
+
+    /** Cancels the plan and every row still pending. Paid rows are kept as history. */
+    public function cancel(InstallmentPlan $plan): InstallmentPlan
+    {
+        if (! in_array($plan->status, ['active'], true)) {
+            throw ValidationException::withMessages(['plan' => ['ยกเลิกได้เฉพาะแผนที่ยังใช้งานอยู่']]);
+        }
+
+        return DB::transaction(function () use ($plan): InstallmentPlan {
+            InstallmentScheduleItem::query()->where('plan_id', $plan->id)->where('status', 'pending')->get()
+                ->each(function (InstallmentScheduleItem $row): void {
+                    $row->status = 'cancelled';
+                    $row->save();
+                });
+
+            $plan->status = 'cancelled';
+            $plan->save();
+
+            if ($plan->funding_type === 'credit_card') {
+                $this->recalculator->recalculateCard(CreditCard::query()->findOrFail($plan->credit_card_id));
             }
 
             return $plan->load('scheduleItems');
