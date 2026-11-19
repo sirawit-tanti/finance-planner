@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: adding the "dark" class on <html> switches theme.
+   Phase 4 adds the toggle; "system" preference will be the default. */
+@custom-variant dark (&:where(.dark, .dark *));
