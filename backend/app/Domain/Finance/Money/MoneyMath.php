@@ -97,4 +97,26 @@ final class MoneyMath
 
         return $result;
     }
+
+    /** Round a NON-NEGATIVE amount down to a multiple of $step (e.g. 16,429.45 => 16,400.00 for 100). */
+    public static function floorToMultiple(BigDecimal $value, int $step): BigDecimal
+    {
+        if ($step < 1 || $value->isNegative()) {
+            throw new InvalidArgumentException('Step must be >= 1 and the value must not be negative.');
+        }
+
+        return $value->dividedBy($step, 0, RoundingMode::Down)
+            ->multipliedBy($step)
+            ->toScale(self::MONEY_SCALE);
+    }
+
+    /** ceil(a / b) as an integer, for positive values (e.g. months needed to reach a goal). */
+    public static function ceilDiv(BigDecimal $a, BigDecimal $b): int
+    {
+        if (! $b->isPositive() || $a->isNegative()) {
+            throw new InvalidArgumentException('Divisor must be positive and the dividend must not be negative.');
+        }
+
+        return $a->dividedBy($b, 0, RoundingMode::Ceiling)->toInt();
+    }
 }
